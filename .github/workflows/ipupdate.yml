@@ -18,33 +18,31 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Fetch ISP IPs (Only use CMCC)
+      - name: Fetch CMCC IP & strip #CF suffix
         run: |
-          CT_IP=$(curl -s --connect-timeout 10 "https://cf.090227.xyz/ct?ips=1" | awk '{print $1}')
-          CU_IP=$(curl -s --connect-timeout 10 "https://cf.090227.xyz/cu?ips=1" | awk '{print $1}')
-          CMCC_IP=$(curl -s --connect-timeout 10 "https://cf.090227.xyz/cmcc?ips=1" | awk '{print $1}')
+          CMCC_IP=$(curl -s --max-time 8 "https://cf.090227.xyz/cmcc?ips=1" || true)
+          # 删除 #CF 及后面所有字符，只保留IP
+          CMCC_IP=$(echo "$CMCC_IP" | sed 's/#CF.*//' | awk '{print $1}')
           BEST_IP=${CMCC_IP}
-          echo "CT_IP=${CT_IP}" >> $GITHUB_ENV
-          echo "CU_IP=${CU_IP}" >> $GITHUB_ENV
           echo "CMCC_IP=${CMCC_IP}" >> $GITHUB_ENV
-          echo "Selected CMCC(Mobile) IP: ${BEST_IP}"
+          echo "Selected CMCC IP: ${BEST_IP}"
 
-      - name: Skip update if IP invalid
+      - name: Skip if IP empty
         if: env.BEST_IP == ''
         run: |
-          echo "⚠️ CMCC IP empty, skip DNS update, keep old record."
+          echo "⚠️ IP fetch failed, abort update, keep old DNS."
           exit 0
 
-      - name: Auto fetch DNS RecordID
+      - name: Get DNS RecordID
         run: |
-          RECORD_ID=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records?name=${CF_DNS_NAME}" \
+          RECORD_ID=$(curl -s --max-time 8 -X GET "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records?name=${CF_DNS_NAME}" \
           -H "Authorization: Bearer ${CF_API_TOKEN}" | jq -r '.result[0].id')
           echo "RECORD_ID=${RECORD_ID}" >> $GITHUB_ENV
-          echo "Auto fetched RecordID: ${RECORD_ID}"
+          echo "Got RecordID: ${RECORD_ID}"
 
-      - name: Update Cloudflare DNS Record
+      - name: Update CF DNS
         run: |
-          curl -X PATCH "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records/${RECORD_ID}" \
+          curl -s --max-time 8 -X PATCH "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records/${RECORD_ID}" \
             -H "Authorization: Bearer ${CF_API_TOKEN}" \
             -H "Content-Type: application/json" \
             -d '{
