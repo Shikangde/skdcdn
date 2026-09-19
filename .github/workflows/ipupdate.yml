@@ -18,31 +18,30 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Fetch CMCC IP & strip #CF suffix
+      - name: Fetch clean CMCC IP
         run: |
           CMCC_IP=$(curl -s --max-time 8 "https://cf.090227.xyz/cmcc?ips=1" || true)
-          # 删除 #CF 及后面所有字符，只保留IP
-          CMCC_IP=$(echo "$CMCC_IP" | sed 's/#CF.*//' | awk '{print $1}')
+          # 清除 #CF、换行、空格，只保留纯IP
+          CMCC_IP=$(echo "$CMCC_IP" | sed 's/#CF.*//' | tr -d '\n\r ' | awk '{print $1}')
           BEST_IP=${CMCC_IP}
           echo "CMCC_IP=${CMCC_IP}" >> $GITHUB_ENV
           echo "Selected CMCC IP: ${BEST_IP}"
 
-      - name: Skip if IP empty
+      - name: Skip if empty
         if: env.BEST_IP == ''
         run: |
-          echo "⚠️ IP fetch failed, abort update, keep old DNS."
+          echo "⚠️ IP为空，跳过更新"
           exit 0
 
-      - name: Get DNS RecordID
+      - name: Get RecordID
         run: |
           RECORD_ID=$(curl -s --max-time 8 -X GET "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records?name=${CF_DNS_NAME}" \
           -H "Authorization: Bearer ${CF_API_TOKEN}" | jq -r '.result[0].id')
           echo "RECORD_ID=${RECORD_ID}" >> $GITHUB_ENV
-          echo "Got RecordID: ${RECORD_ID}"
 
-      - name: Update CF DNS
+      - name: Update DNS Record
         run: |
-          curl -s --max-time 8 -X PATCH "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records/${RECORD_ID}" \
+          RESULT=$(curl -s --max-time 8 -X PATCH "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records/${RECORD_ID}" \
             -H "Authorization: Bearer ${CF_API_TOKEN}" \
             -H "Content-Type: application/json" \
             -d '{
@@ -51,4 +50,5 @@ jobs:
               "content":"'${BEST_IP}'",
               "ttl": 300,
               "proxied": false
-            }'
+            }')
+          echo "$RESULT"
