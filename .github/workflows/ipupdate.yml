@@ -1,16 +1,16 @@
-name: Auto‑Update CF BestIP (Auto‑Get RecordID)
+name: Auto‑Update CF DNS (Mobile CMCC IP)
 on:
   schedule:
-    # UTC时间 = 北京时间 −8小时
-    - cron: '0 2 * * *'    # 北京时间 10:00
-    - cron: '0 6 * * *'    # 北京时间 14:00
-    - cron: '0 11 * * *'   # 北京时间 19:00
-    - cron: '0 16 * * *'   # 北京时间 00:00
-  workflow_dispatch:        # 支持手动一键运行
+    # 北京时间 10:00 /14:00 /19:00 /00:00
+    - cron: '0 2 * * *'
+    - cron: '0 6 * * *'
+    - cron: '0 11 * * *'
+    - cron: '0 16 * * *'
+  workflow_dispatch:
 
 jobs:
   update:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu‑24.04
     env:
       CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
       CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
@@ -19,33 +19,35 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download CloudflareSpeedTest
+      # 获取三网IP，只选用移动CMCC IP
+      - name: Fetch ISP IPs (Only use CMCC)
         run: |
-          wget -q https://github.com/XIU2/CloudflareSpeedTest/releases/latest/download/CloudflareSpeedTest-linux-amd64.tar.gz
-          tar -zxf CloudflareSpeedTest-linux-amd64.tar.gz
-          chmod +x ./CloudflareSpeedTest
+          CT_IP=$(curl -s --connect-timeout 10 "https://cf.090227.xyz/ct?ips=1" | awk '{print $1}')
+          CU_IP=$(curl -s --connect-timeout 10 "https://cf.090227.xyz/cu?ips=1" | awk '{print $1}')
+          CMCC_IP=$(curl -s --connect-timeout 10 "https://cf.090227.xyz/cmcc?ips=1" | awk '{print $1}')
+          BEST_IP=${CMCC_IP}
+          echo "CT_IP=${CT_IP}" >> $GITHUB_ENV
+          echo "CU_IP=${CU_IP}" >> $GITHUB_ENV
+          echo "CMCC_IP=${CMCC_IP}" >> $GITHUB_ENV
+          echo "Selected CMCC(Mobile) IP: ${BEST_IP}"
 
-      - name: SpeedTest pick best IP (sort by download speed)
-        run: |
-          ./CloudflareSpeedTest -t 25 -n 6 -sort download
-          BEST_IP=$(sed -n '2p' result.csv | awk -F ',' '{print $1}')
-          echo "BEST_IP=${BEST_IP}" >> $GITHUB_ENV
-          echo "Selected Best IP: ${BEST_IP}"
-
-      - name: Skip update if no valid IP found
+      # IP为空则跳过更新，保留旧IP
+      - name: Skip update if IP invalid
         if: env.BEST_IP == ''
         run: |
-          echo "No valid IP found, skip DNS update, keep old IP."
+          echo "⚠️ CMCC IP empty, skip DNS update, keep old record."
           exit 0
 
-      - name: Auto fetch DNS RecordID automatically
+      # 自动获取DNS RecordID
+      - name: Auto fetch DNS RecordID
         run: |
           RECORD_ID=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records?name=${CF_DNS_NAME}" \
           -H "Authorization: Bearer ${CF_API_TOKEN}" | jq -r '.result[0].id')
           echo "RECORD_ID=${RECORD_ID}" >> $GITHUB_ENV
           echo "Auto fetched RecordID: ${RECORD_ID}"
 
-      - name: Update Cloudflare DNS A Record
+      # 更新CF DNS A记录
+      - name: Update Cloudflare DNS Record
         run: |
           curl -X PATCH "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records/${RECORD_ID}" \
             -H "Authorization: Bearer ${CF_API_TOKEN}" \
