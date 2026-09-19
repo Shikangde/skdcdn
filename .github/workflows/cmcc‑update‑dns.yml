@@ -10,9 +10,10 @@ jobs:
   update:
     runs-on: ubuntu-24.04
     env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
       CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
       CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
-      CF_DNS_NAME: cmcc‑origin.4219520.xyz
+      CF_DNS_NAME: cmcc-origin.4219520.xyz
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -34,11 +35,17 @@ jobs:
           RECORD_ID=$(curl -s --max-time 8 -X GET "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records?name=${CF_DNS_NAME}" \
           -H "Authorization: Bearer ${CF_API_TOKEN}" | jq -r '.result[0].id')
           echo "RECORD_ID=${RECORD_ID}" >> $GITHUB_ENV
+          echo "RecordID = $RECORD_ID"
+      - name: Stop if Record ID empty
+        if: env.RECORD_ID == ''
+        run: |
+          echo "❌ 未找到DNS记录，请先在CF后台创建A记录 ${CF_DNS_NAME}"
+          exit 1
       - name: Send update request to Cloudflare
         run: |
           RESP=$(curl -s --max-time 8 -X PATCH "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records/${RECORD_ID}" \
             -H "Authorization: Bearer ${CF_API_TOKEN}" \
-            -H "Content‑Type: application/json" \
+            -H "Content-Type: application/json" \
             -d "{
               \"type\":\"A\",
               \"name\":\"${CF_DNS_NAME}\",
