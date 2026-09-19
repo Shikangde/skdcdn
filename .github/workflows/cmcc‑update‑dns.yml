@@ -1,4 +1,4 @@
-name: Auto‑Update CMCC Origin DNS
+name: Auto‑Update CMCC Route DNS
 on:
   schedule:
     - cron: '0 2 * * *'
@@ -13,10 +13,11 @@ jobs:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
       CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
       CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
-      CF_DNS_NAME: cmcc-origin.4219520.xyz
+      CF_DNS_NAME: cmcc-route.4219520.xyz
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
       - name: Fetch CMCC IP & extract pure IPv4
         run: |
           RAW=$(curl -s --max-time 8 "https://cf.090227.xyz/cmcc?ips=1" || true)
@@ -25,22 +26,26 @@ jobs:
           echo "RAW_DATA: $RAW"
           echo "BEST_IP: $BEST_IP"
           echo "BEST_IP=${BEST_IP}" >> $GITHUB_ENV
+
       - name: Stop if IP empty
         if: env.BEST_IP == ''
         run: |
-          echo "❌ 获取IP为空，退出更新"
+          echo "❌ 获取优选IP为空，退出本次更新"
           exit 1
+
       - name: Get DNS Record ID
         run: |
           RECORD_ID=$(curl -s --max-time 8 -X GET "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records?name=${CF_DNS_NAME}" \
           -H "Authorization: Bearer ${CF_API_TOKEN}" | jq -r '.result[0].id')
           echo "RECORD_ID=${RECORD_ID}" >> $GITHUB_ENV
           echo "RecordID = $RECORD_ID"
+
       - name: Stop if Record ID empty
         if: env.RECORD_ID == ''
         run: |
-          echo "❌ 未找到DNS记录，请先在CF后台创建A记录 ${CF_DNS_NAME}"
+          echo "❌ 找不到DNS记录 ${CF_DNS_NAME}！请先去CF后台手动创建A记录！"
           exit 1
+
       - name: Send update request to Cloudflare
         run: |
           RESP=$(curl -s --max-time 8 -X PATCH "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records/${RECORD_ID}" \
