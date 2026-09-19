@@ -18,37 +18,40 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Fetch clean CMCC IP
+      - name: Fetch CMCC IP & extract pure IPv4
         run: |
-          CMCC_IP=$(curl -s --max-time 8 "https://cf.090227.xyz/cmcc?ips=1" || true)
-          # 清除 #CF、换行、空格，只保留纯IP
-          CMCC_IP=$(echo "$CMCC_IP" | sed 's/#CF.*//' | tr -d '\n\r ' | awk '{print $1}')
-          BEST_IP=${CMCC_IP}
-          echo "CMCC_IP=${CMCC_IP}" >> $GITHUB_ENV
-          echo "Selected CMCC IP: ${BEST_IP}"
+          RAW=$(curl -s --max-time 8 "https://cf.090227.xyz/cmcc?ips=1" || true)
+          # 正则抓取纯IPv4地址，忽略 #CF等后缀
+          CMCC_IP=$(echo "$RAW" | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}')
+          BEST_IP="$CMCC_IP"
+          echo "RAW_DATA: $RAW"
+          echo "BEST_IP: $BEST_IP"
+          echo "BEST_IP=${BEST_IP}" >> $GITHUB_ENV
 
-      - name: Skip if empty
+      - name: Stop if IP empty
         if: env.BEST_IP == ''
         run: |
-          echo "⚠️ IP为空，跳过更新"
-          exit 0
+          echo "❌ 获取IP为空，退出更新"
+          exit 1
 
-      - name: Get RecordID
+      - name: Get DNS Record ID
         run: |
           RECORD_ID=$(curl -s --max-time 8 -X GET "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records?name=${CF_DNS_NAME}" \
           -H "Authorization: Bearer ${CF_API_TOKEN}" | jq -r '.result[0].id')
           echo "RECORD_ID=${RECORD_ID}" >> $GITHUB_ENV
+          echo "RecordID = $RECORD_ID"
 
-      - name: Update DNS Record
+      - name: Send update request to Cloudflare
         run: |
-          RESULT=$(curl -s --max-time 8 -X PATCH "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records/${RECORD_ID}" \
+          RESP=$(curl -s --max-time 8 -X PATCH "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records/${RECORD_ID}" \
             -H "Authorization: Bearer ${CF_API_TOKEN}" \
             -H "Content-Type: application/json" \
-            -d '{
-              "type":"A",
-              "name":"'${CF_DNS_NAME}'",
-              "content":"'${BEST_IP}'",
-              "ttl": 300,
-              "proxied": false
-            }')
-          echo "$RESULT"
+            -d "{
+              \"type\":\"A\",
+              \"name\":\"${CF_DNS_NAME}\",
+              \"content\":\"${BEST_IP}\",
+              \"ttl\": 300,
+              \"proxied\": false
+            }")
+          echo "CF API RESPONSE:"
+          echo "$RESP"
